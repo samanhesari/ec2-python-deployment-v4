@@ -130,20 +130,6 @@ jobs:
           IMAGE_NAME: ghcr.io/${{ github.repository }}
         run: |
 
-          set -x
-
-          echo "========================================"
-          echo "        V4.6 EC2 DEPLOYMENT"
-          echo "========================================"
-
-          echo
-          echo "[INFO] EC2 host: $EC2_HOST"
-          echo "[INFO] EC2 user: $EC2_USER"
-          echo "[INFO] Image: $IMAGE_NAME"
-
-          echo
-          echo "[1/5] Preparing SSH..."
-
           mkdir -p ~/.ssh
 
           echo "$EC2_SSH_KEY" > ~/.ssh/ec2_key
@@ -151,73 +137,22 @@ jobs:
 
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
-          echo
-          echo "[2/5] Testing SSH connection..."
-
-          ssh \
-            -i ~/.ssh/ec2_key \
-            -o BatchMode=yes \
-            -o ConnectTimeout=10 \
-            "$EC2_USER@$EC2_HOST" \
-            "echo '[SUCCESS] SSH connection works'"
-
-          echo
-          echo "[3/5] Checking Docker on EC2..."
-
-          ssh \
-            -i ~/.ssh/ec2_key \
-            "$EC2_USER@$EC2_HOST" \
-            "docker --version"
-
-          echo
-          echo "[4/5] Checking Docker Compose on EC2..."
-
-          ssh \
-            -i ~/.ssh/ec2_key \
-            "$EC2_USER@$EC2_HOST" \
-            "docker compose version"
-
-          echo
-          echo "[5/5] Preparing application directory..."
-
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
             "mkdir -p ~/v4-app"
-
-          echo
-          echo "[INFO] Copying production Compose file..."
 
           scp \
             -i ~/.ssh/ec2_key \
             docker-compose.prod.yml \
             "$EC2_USER@$EC2_HOST:~/v4-app/docker-compose.prod.yml"
 
-          echo
-          echo "[INFO] Pulling application image..."
-
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
-            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml pull"
-
-          echo
-          echo "[INFO] Starting application..."
-
-          ssh \
-            -i ~/.ssh/ec2_key \
-            "$EC2_USER@$EC2_HOST" \
-            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml up -d"
-
-          echo
-          echo "[INFO] Application status..."
+            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml pull && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml up -d"
 
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
             "cd ~/v4-app && docker compose -f docker-compose.prod.yml ps"
-
-          echo
-          echo "========================================"
-          echo "        DEPLOYMENT COMPLETE"
-          echo "========================================"
