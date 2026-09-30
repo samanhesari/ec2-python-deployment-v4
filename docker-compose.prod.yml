@@ -1,0 +1,51 @@
+services:
+
+  api:
+    image: ${IMAGE_NAME}:latest
+    container_name: v4_api
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      DATABASE_URL: mysql+pymysql://v4user:v4password@mysql:3306/v4_app
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+
+  mysql:
+    image: mysql:8.0
+    container_name: v4_mysql
+    restart: unless-stopped
+
+    environment:
+      MYSQL_DATABASE: v4_app
+      MYSQL_USER: v4user
+      MYSQL_PASSWORD: v4password
+      MYSQL_ROOT_PASSWORD: rootpassword
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-prootpassword"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+volumes:
+  mysql_data:
