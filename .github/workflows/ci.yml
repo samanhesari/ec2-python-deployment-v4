@@ -75,7 +75,7 @@ jobs:
 
 
   # ==========================================================
-  # BUILD AND PUSH
+  # BUILD AND PUSH DOCKER IMAGE
   # ==========================================================
 
   build-and-push:
@@ -127,7 +127,7 @@ jobs:
 
 
   # ==========================================================
-  # DEPLOY TO EC2
+  # DEPLOY TO AWS EC2
   # ==========================================================
 
   deploy:
@@ -161,7 +161,7 @@ jobs:
 
 
           # ==================================================
-          # CHECK SECRETS
+          # CHECK REQUIRED SECRETS
           # ==================================================
 
           echo "Checking required deployment secrets..."
@@ -190,7 +190,7 @@ jobs:
 
 
           # ==================================================
-          # SSH SETUP
+          # PREPARE SSH
           # ==================================================
 
           echo
@@ -198,7 +198,7 @@ jobs:
 
           mkdir -p ~/.ssh
 
-          echo "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
 
           chmod 600 ~/.ssh/ec2_key
 
@@ -206,7 +206,20 @@ jobs:
 
 
           # ==================================================
-          # EC2 APPLICATION DIRECTORY
+          # TEST SSH
+          # ==================================================
+
+          echo
+          echo "Testing SSH connection..."
+
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            "echo '[SUCCESS] SSH connection established.'"
+
+
+          # ==================================================
+          # PREPARE EC2 APPLICATION DIRECTORY
           # ==================================================
 
           echo
@@ -232,33 +245,57 @@ jobs:
 
 
           # ==================================================
-          # CREATE PRODUCTION ENVIRONMENT
+          # CREATE PRODUCTION ENVIRONMENT FILE
           # ==================================================
 
           echo
           echo "Creating production environment file..."
 
-          JWT_SECRET_B64="$(printf '%s' "$JWT_SECRET_KEY" | base64 -w0)"
+          printf 'JWT_SECRET_KEY=%s\n' "$JWT_SECRET_KEY" | \
+            ssh \
+              -i ~/.ssh/ec2_key \
+              "$EC2_USER@$EC2_HOST" \
+              'umask 077 && cat > ~/v4-app/.env'
 
-          ssh \
-            -i ~/.ssh/ec2_key \
-            "$EC2_USER@$EC2_HOST" \
-            "printf '%s' '$JWT_SECRET_B64' | base64 -d > ~/v4-app/.env && chmod 600 ~/v4-app/.env"
+          echo "[SUCCESS] Production environment file created."
 
 
           # ==================================================
-          # VERIFY ENVIRONMENT
+          # VERIFY PRODUCTION ENVIRONMENT FILE
           # ==================================================
 
           echo
-          echo "Verifying production environment file..."
+          echo "Checking production environment file..."
 
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
-            'test -f ~/v4-app/.env && test -s ~/v4-app/.env && grep -q "^JWT_SECRET_KEY=" ~/v4-app/.env'
+            'test -f ~/v4-app/.env'
 
-          echo "[SUCCESS] Production environment file is ready."
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            'test -s ~/v4-app/.env'
+
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            'grep -q "^JWT_SECRET_KEY=" ~/v4-app/.env'
+
+          echo "[SUCCESS] Production environment file is valid."
+
+
+          # ==================================================
+          # SECURE ENVIRONMENT FILE
+          # ==================================================
+
+          echo
+          echo "Setting secure permissions..."
+
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            "chmod 600 ~/v4-app/.env"
 
 
           # ==================================================
@@ -277,7 +314,7 @@ jobs:
 
 
           # ==================================================
-          # PULL IMAGE
+          # PULL DOCKER IMAGE
           # ==================================================
 
           echo
@@ -303,7 +340,7 @@ jobs:
 
 
           # ==================================================
-          # WAIT
+          # WAIT FOR APPLICATION
           # ==================================================
 
           echo
@@ -313,7 +350,7 @@ jobs:
 
 
           # ==================================================
-          # CHECK STATUS
+          # CHECK CONTAINER STATUS
           # ==================================================
 
           echo
@@ -324,6 +361,10 @@ jobs:
             "$EC2_USER@$EC2_HOST" \
             "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose --env-file .env -f docker-compose.prod.yml ps"
 
+
+          # ==================================================
+          # FINISHED
+          # ==================================================
 
           echo
           echo "Deployment completed successfully."
