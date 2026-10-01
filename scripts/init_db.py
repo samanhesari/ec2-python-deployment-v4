@@ -1,4 +1,5 @@
 from app import models
+from app import user_models
 from app.database import Base, engine
 
 

@@ -2,15 +2,20 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app import crud
+from app.auth import get_current_username
+from app.auth_routes import router as auth_router
 from app.database import get_db
 from app.schemas import ItemCreate, ItemResponse, ItemUpdate
 
 
 app = FastAPI(
     title="V4 FastAPI CRUD Application",
-    description="A simple FastAPI CRUD application with MySQL.",
+    description="A simple FastAPI CRUD application with MySQL and JWT authentication.",
     version="4.0.0",
 )
+
+
+app.include_router(auth_router)
 
 
 @app.get("/")
@@ -36,6 +41,7 @@ def health():
 def create_item(
     item: ItemCreate,
     db: Session = Depends(get_db),
+    current_username: str = Depends(get_current_username),
 ):
     return crud.create_item(db, item)
 
@@ -46,6 +52,7 @@ def create_item(
 )
 def read_items(
     db: Session = Depends(get_db),
+    current_username: str = Depends(get_current_username),
 ):
     return crud.get_items(db)
 
@@ -57,6 +64,7 @@ def read_items(
 def read_item(
     item_id: int,
     db: Session = Depends(get_db),
+    current_username: str = Depends(get_current_username),
 ):
     item = crud.get_item(db, item_id)
 
@@ -77,6 +85,7 @@ def update_item(
     item_id: int,
     item: ItemUpdate,
     db: Session = Depends(get_db),
+    current_username: str = Depends(get_current_username),
 ):
     updated_item = crud.update_item(
         db,
@@ -100,6 +109,7 @@ def update_item(
 def delete_item(
     item_id: int,
     db: Session = Depends(get_db),
+    current_username: str = Depends(get_current_username),
 ):
     deleted_item = crud.delete_item(
         db,

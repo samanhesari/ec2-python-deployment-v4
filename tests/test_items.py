@@ -1,4 +1,4 @@
-def test_create_item(client):
+def test_create_item(client, auth_headers):
     response = client.post(
         "/items",
         json={
@@ -6,6 +6,7 @@ def test_create_item(client):
             "description": "Test item",
             "price": 1000,
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 201
@@ -18,7 +19,7 @@ def test_create_item(client):
     assert "id" in data
 
 
-def test_get_items(client):
+def test_get_items(client, auth_headers):
     client.post(
         "/items",
         json={
@@ -26,6 +27,7 @@ def test_get_items(client):
             "description": "Development laptop",
             "price": 1200,
         },
+        headers=auth_headers,
     )
 
     client.post(
@@ -35,9 +37,13 @@ def test_get_items(client):
             "description": "Mechanical keyboard",
             "price": 100,
         },
+        headers=auth_headers,
     )
 
-    response = client.get("/items")
+    response = client.get(
+        "/items",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
@@ -48,7 +54,7 @@ def test_get_items(client):
     assert data[1]["name"] == "Keyboard"
 
 
-def test_get_single_item(client):
+def test_get_single_item(client, auth_headers):
     create_response = client.post(
         "/items",
         json={
@@ -56,11 +62,15 @@ def test_get_single_item(client):
             "description": "4K monitor",
             "price": 500,
         },
+        headers=auth_headers,
     )
 
     item_id = create_response.json()["id"]
 
-    response = client.get(f"/items/{item_id}")
+    response = client.get(
+        f"/items/{item_id}",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
@@ -71,16 +81,20 @@ def test_get_single_item(client):
     assert data["price"] == 500
 
 
-def test_get_nonexistent_item(client):
-    response = client.get("/items/99999")
+def test_get_nonexistent_item(client, auth_headers):
+    response = client.get(
+        "/items/99999",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 404
+
     assert response.json() == {
         "detail": "Item not found"
     }
 
 
-def test_update_item(client):
+def test_update_item(client, auth_headers):
     create_response = client.post(
         "/items",
         json={
@@ -88,6 +102,7 @@ def test_update_item(client):
             "description": "Old description",
             "price": 1000,
         },
+        headers=auth_headers,
     )
 
     item_id = create_response.json()["id"]
@@ -99,6 +114,7 @@ def test_update_item(client):
             "description": "Updated description",
             "price": 1500,
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -111,7 +127,7 @@ def test_update_item(client):
     assert data["price"] == 1500
 
 
-def test_delete_item(client):
+def test_delete_item(client, auth_headers):
     create_response = client.post(
         "/items",
         json={
@@ -119,14 +135,21 @@ def test_delete_item(client):
             "description": "Temporary item",
             "price": 50,
         },
+        headers=auth_headers,
     )
 
     item_id = create_response.json()["id"]
 
-    response = client.delete(f"/items/{item_id}")
+    response = client.delete(
+        f"/items/{item_id}",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 204
 
-    get_response = client.get(f"/items/{item_id}")
+    get_response = client.get(
+        f"/items/{item_id}",
+        headers=auth_headers,
+    )
 
     assert get_response.status_code == 404

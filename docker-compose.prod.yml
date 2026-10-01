@@ -10,6 +10,7 @@ services:
 
     environment:
       DATABASE_URL: mysql+pymysql://v4user:v4password@mysql:3306/v4_app
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
 
     depends_on:
       mysql:

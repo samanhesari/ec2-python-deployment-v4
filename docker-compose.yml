@@ -3,24 +3,32 @@ services:
   api:
     build: .
     container_name: v4_api
+
     ports:
       - "8000:8000"
+
     environment:
       DATABASE_URL: mysql+pymysql://v4user:v4password@mysql:3306/v4_app
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+
     depends_on:
       mysql:
         condition: service_healthy
 
+
   mysql:
     image: mysql:8.0
     container_name: v4_mysql
+
     environment:
       MYSQL_DATABASE: v4_app
       MYSQL_USER: v4user
       MYSQL_PASSWORD: v4password
       MYSQL_ROOT_PASSWORD: rootpassword
+
     volumes:
       - mysql_data:/var/lib/mysql
+
     healthcheck:
       test:
         [
@@ -36,6 +44,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
 
 volumes:
   mysql_data:

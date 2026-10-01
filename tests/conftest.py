@@ -65,3 +65,32 @@ def client():
         yield test_client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def auth_headers(client):
+    register_response = client.post(
+        "/auth/register",
+        json={
+            "username": "testuser",
+            "password": "password123",
+        },
+    )
+
+    assert register_response.status_code == 201
+
+    login_response = client.post(
+        "/auth/login",
+        data={
+            "username": "testuser",
+            "password": "password123",
+        },
+    )
+
+    assert login_response.status_code == 200
+
+    token = login_response.json()["access_token"]
+
+    return {
+        "Authorization": f"Bearer {token}",
+    }

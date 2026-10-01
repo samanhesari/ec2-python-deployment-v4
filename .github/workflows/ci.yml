@@ -1,6 +1,7 @@
 name: V4 CI/CD
 
 on:
+
   push:
     branches:
       - main
@@ -11,12 +12,17 @@ on:
 
   workflow_dispatch:
 
+
 permissions:
   contents: read
   packages: write
 
 
 jobs:
+
+  # ==========================================================
+  # TEST
+  # ==========================================================
 
   test:
 
@@ -44,25 +50,33 @@ jobs:
           --health-timeout=5s
           --health-retries=10
 
+
     steps:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+
       - name: Run tests
         run: |
           pytest -v
 
+
+  # ==========================================================
+  # BUILD AND PUSH
+  # ==========================================================
 
   build-and-push:
 
@@ -74,13 +88,16 @@ jobs:
 
     runs-on: ubuntu-latest
 
+
     steps:
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
 
       - name: Generate Docker metadata
         id: meta
@@ -91,12 +108,14 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
 
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -106,6 +125,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+
+  # ==========================================================
+  # DEPLOY
+  # ==========================================================
 
   deploy:
 
@@ -117,42 +140,104 @@ jobs:
 
     runs-on: ubuntu-latest
 
+
     steps:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+
 
       - name: Deploy application to EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           IMAGE_NAME: ghcr.io/${{ github.repository }}
+
         run: |
+
+          set -e
+
+          echo "Checking required deployment secrets..."
+
+          if [ -z "$EC2_HOST" ]; then
+            echo "[ERROR] EC2_HOST is not configured."
+            exit 1
+          fi
+
+          if [ -z "$EC2_USER" ]; then
+            echo "[ERROR] EC2_USER is not configured."
+            exit 1
+          fi
+
+          if [ -z "$EC2_SSH_KEY" ]; then
+            echo "[ERROR] EC2_SSH_KEY is not configured."
+            exit 1
+          fi
+
+          if [ -z "$JWT_SECRET_KEY" ]; then
+            echo "[ERROR] JWT_SECRET_KEY is not configured."
+            exit 1
+          fi
+
+
+          echo "Preparing SSH..."
 
           mkdir -p ~/.ssh
 
           echo "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+
           chmod 600 ~/.ssh/ec2_key
 
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+
+          echo "Preparing application directory..."
 
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
             "mkdir -p ~/v4-app"
 
+
+          echo "Uploading production Docker Compose file..."
+
           scp \
             -i ~/.ssh/ec2_key \
             docker-compose.prod.yml \
             "$EC2_USER@$EC2_HOST:~/v4-app/docker-compose.prod.yml"
+
+
+          echo "Creating production environment file..."
+
+          JWT_SECRET_B64="$(printf '%s' "$JWT_SECRET_KEY" | base64 -w0)"
+
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            "echo '$JWT_SECRET_B64' | base64 -d > ~/v4-app/.env && chmod 600 ~/v4-app/.env"
+
+
+          echo "Pulling Docker image and deploying..."
 
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
             "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml pull && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml up -d"
 
+
+          echo "Waiting for containers..."
+
+          sleep 10
+
+
+          echo "Checking application status..."
+
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
             "cd ~/v4-app && docker compose -f docker-compose.prod.yml ps"
+
+
+          echo "Deployment completed successfully."

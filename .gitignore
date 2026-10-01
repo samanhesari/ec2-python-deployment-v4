@@ -1,15 +1,15 @@
 .venv/
 __pycache__/
-*.py[cod]
 .pytest_cache/
+*.pyc
+*.pyo
 
 .env
+.env.*
+!.env.example
+
 *.pem
 *.key
 
-.vscode/
 .idea/
-
-.DS_Store
-
-scripts/aws/ec2.conf
+.vscode/
