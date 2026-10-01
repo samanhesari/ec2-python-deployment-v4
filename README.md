@@ -1,8 +1,10 @@
+Here is the professionally formatted GitHub README, with the **content kept unchanged** and only the presentation/Markdown structure improved.
+
 # EC2 Python Deployment V4
 
-A production-style learning project demonstrating how to build, test, containerize, and continuously deploy a FastAPI CRUD application backed by MySQL to AWS EC2 using Docker Compose, GitHub Actions, and GitHub Container Registry (GHCR).
+A production-style learning project demonstrating how to build, test, authenticate, containerize, and continuously deploy a FastAPI CRUD application backed by MySQL to AWS EC2 using Docker Compose, GitHub Actions, and GitHub Container Registry (GHCR).
 
-V4 builds on the DevOps concepts introduced in V3 while replacing the system-information application with a real API and database.
+V4 builds on the DevOps concepts introduced in V3 while replacing the system-information application with a real API, database, automated tests, and JWT authentication.
 
 ---
 
@@ -40,6 +42,23 @@ GitHub Actions
       API          Database
 ```
 
+The application also includes JWT authentication:
+
+```text
+User
+ |
+ | Register / Login
+ v
+FastAPI
+ |
+ +-- Argon2 password hashing
+ |
+ +-- JWT token
+ |
+ v
+Protected CRUD API
+```
+
 The goal is to understand the complete deployment process rather than hiding the infrastructure behind managed services.
 
 ---
@@ -55,11 +74,20 @@ The goal is to understand the complete deployment process rather than hiding the
 * SQLAlchemy
 * PyMySQL
 
+### Authentication
+
+* JWT
+* python-jose
+* pwdlib
+* Argon2 password hashing
+* OAuth2 password flow
+
 ### Testing
 
 * pytest
 * FastAPI TestClient
 * isolated MySQL test database
+* authentication test fixtures
 
 ### Containers
 
@@ -77,6 +105,7 @@ The goal is to understand the complete deployment process rather than hiding the
 
 * AWS EC2
 * AWS Security Groups
+* AWS CLI
 
 ---
 
@@ -92,18 +121,24 @@ ec2-python-deployment-v4/
 |   +-- models.py
 |   +-- schemas.py
 |   +-- crud.py
+|   +-- auth.py
+|   +-- auth_routes.py
+|   +-- auth_schemas.py
+|   +-- user_models.py
 |
 +-- tests/
 |   +-- __init__.py
 |   +-- conftest.py
 |   +-- test_database.py
 |   +-- test_items.py
+|   +-- test_auth.py
+|   +-- test_main.py
 |
 +-- scripts/
 |   |
 |   +-- local/
-|   |   +-- run.sh
-|   |   +-- test.sh
+|   |   +-- run_local.sh
+|   |   +-- run_docker.sh
 |   |
 |   +-- aws/
 |   |   +-- ec2.sh
@@ -122,6 +157,8 @@ ec2-python-deployment-v4/
 +-- docker-compose.yml
 +-- docker-compose.prod.yml
 +-- requirements.txt
++-- .env
++-- .env.example
 +-- .gitignore
 +-- README.md
 ```
@@ -132,21 +169,37 @@ ec2-python-deployment-v4/
 
 ### Endpoints
 
-| Method   | Endpoint      | Purpose                 |
-| -------- | ------------- | ----------------------- |
-| `GET`    | `/`           | Application information |
-| `GET`    | `/health`     | Health check            |
-| `POST`   | `/items`      | Create item             |
-| `GET`    | `/items`      | List items              |
-| `GET`    | `/items/{id}` | Get item                |
-| `PUT`    | `/items/{id}` | Update item             |
-| `DELETE` | `/items/{id}` | Delete item             |
+| Method   | Endpoint         | Purpose                 |
+| -------- | ---------------- | ----------------------- |
+| `GET`    | `/`              | Application information |
+| `GET`    | `/health`        | Health check            |
+| `POST`   | `/auth/register` | Register user           |
+| `POST`   | `/auth/login`    | Login and receive JWT   |
+| `POST`   | `/items`         | Create item             |
+| `GET`    | `/items`         | List items              |
+| `GET`    | `/items/{id}`    | Get item                |
+| `PUT`    | `/items/{id}`    | Update item             |
+| `DELETE` | `/items/{id}`    | Delete item             |
+
+The `/items` endpoints require authentication.
+
+A valid JWT must be supplied:
+
+```text
+Authorization: Bearer <JWT>
+```
+
+Without a valid token:
+
+```text
+401 Unauthorized
+```
 
 ---
 
 ## 5. Complete Deployment Process
 
-This section describes the complete process from a fresh project to a running application on AWS EC2.
+This section describes the complete process from a fresh project to a running authenticated application on AWS EC2.
 
 The deployment process is:
 
@@ -154,26 +207,31 @@ The deployment process is:
 2. Prepare local development environment
 3. Prepare application
 4. Prepare MySQL
-5. Prepare automated tests
-6. Prepare Docker
-7. Test Docker locally
-8. Prepare AWS EC2
-9. Configure EC2 Docker
-10. Configure EC2 SSH access
-11. Configure AWS Security Group
-12. Configure GHCR
-13. Configure GitHub Secrets
-14. Configure GitHub Actions
-15. Configure production Docker Compose
-16. Push application
-17. Run CI tests
-18. Build Docker image
-19. Push image to GHCR
-20. Deploy image to EC2
-21. Verify containers
-22. Verify API
-23. Test CRUD
-24. Verify database persistence
+5. Prepare authentication
+6. Prepare test database
+7. Prepare automated tests
+8. Prepare Docker
+9. Test application locally
+10. Test Docker locally
+11. Prepare AWS EC2
+12. Configure EC2 Docker
+13. Configure EC2 SSH access
+14. Configure AWS Security Group
+15. Configure GHCR
+16. Configure GitHub Secrets
+17. Configure JWT secret
+18. Configure GitHub Actions
+19. Configure production Docker Compose
+20. Push application
+21. Run CI tests
+22. Build Docker image
+23. Push image to GHCR
+24. Deploy image to EC2
+25. Verify containers
+26. Verify API
+27. Test authentication
+28. Test CRUD
+29. Verify database persistence
 
 ---
 
@@ -199,21 +257,20 @@ Enter the project:
 cd ~/Repositeries/ec2-python-deployment-v4
 ```
 
-### IMPORTANT
-
-The GitHub repository already exists, so do **NOT** run:
-
-```bash
-git init
-```
-
-and do **NOT** run:
-
-```bash
-git remote add origin ...
-```
-
-The repository already has its GitHub remote.
+> **IMPORTANT:**
+> The GitHub repository already exists, so do NOT run:
+>
+> ```bash
+> git init
+> ```
+>
+> and do NOT run:
+>
+> ```bash
+> git remote add origin ...
+> ```
+>
+> The repository already has its GitHub remote.
 
 ---
 
@@ -227,22 +284,27 @@ python3 --version
 
 The project uses Python 3.12.
 
-The project scripts automatically create the virtual environment.
+The local scripts automatically create the virtual environment when necessary.
 
 Run:
 
 ```bash
-./scripts/local/test.sh
+./scripts/local/run_local.sh
 ```
 
-The script:
+The script prepares the local Python environment and starts FastAPI.
 
-1. Checks Python
-2. Creates `.venv` if necessary
-3. Activates `.venv`
-4. Upgrades pip
-5. Installs `requirements.txt`
-6. Runs pytest
+For automated tests:
+
+```bash
+pytest -v
+```
+
+The project currently uses:
+
+```text
+14 passed
+```
 
 ---
 
@@ -287,6 +349,8 @@ Then:
 USE v4_app;
 ```
 
+The local application database is used when running FastAPI directly on the laptop.
+
 ---
 
 ## 9. Step 4 - Prepare Test Database
@@ -319,26 +383,128 @@ The test suite uses:
 v4_app_test
 ```
 
+This prevents automated tests from accidentally modifying normal development data.
+
 ---
 
-## 10. Step 5 - Test Application Locally
+## 10. Step 5 - Prepare JWT Authentication
+
+V4 now includes JWT authentication.
+
+The authentication flow is:
+
+```text
+Register
+   |
+   v
+Username + Password
+   |
+   v
+Argon2 password hash
+   |
+   v
+MySQL users table
+```
+
+Login:
+
+```text
+Username + Password
+   |
+   v
+Verify password
+   |
+   v
+Create JWT
+   |
+   v
+Return access token
+```
+
+Protected request:
+
+```text
+Client
+   |
+   | Authorization: Bearer JWT
+   v
+FastAPI
+   |
+   v
+Validate JWT
+   |
+   v
+Protected CRUD endpoint
+```
+
+The JWT implementation is located in:
+
+```text
+app/auth.py
+```
+
+Authentication routes:
+
+```text
+app/auth_routes.py
+```
+
+Authentication schemas:
+
+```text
+app/auth_schemas.py
+```
+
+User database model:
+
+```text
+app/user_models.py
+```
+
+---
+
+## 11. Step 6 - Prepare JWT Secret
+
+Generate a secure random secret:
+
+```bash
+openssl rand -hex 32
+```
+
+Create the local environment file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env`:
+
+```text
+JWT_SECRET_KEY=YOUR_GENERATED_SECRET
+```
+
+The `.env` file must never be committed to Git.
+
+The JWT secret is used by FastAPI to sign and verify JWT tokens.
+
+The application uses:
+
+```text
+Algorithm:
+HS256
+
+Default token lifetime:
+30 minutes
+```
+
+---
+
+## 12. Step 7 - Test Application Locally
 
 Run:
 
 ```bash
-./scripts/local/test.sh
-```
-
-Expected result:
-
-```text
-9 passed
-```
-
-Then run the API:
-
-```bash
-./scripts/local/run.sh
+./scripts/local/run_local.sh
 ```
 
 Application:
@@ -359,11 +525,73 @@ Health:
 http://127.0.0.1:8000/health
 ```
 
+The local application uses the local MySQL database.
+
+Stop the application with:
+
+```text
+CTRL+C
+```
+
 ---
 
-## 11. Step 6 - Test CRUD Locally
+## 13. Step 8 - Test Authentication Locally
 
-Create an item:
+Open:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Register:
+
+```text
+POST /auth/register
+```
+
+Example:
+
+```json
+{
+  "username": "saman",
+  "password": "password123"
+}
+```
+
+Login:
+
+```text
+POST /auth/login
+```
+
+The login endpoint returns:
+
+```json
+{
+  "access_token": "JWT_TOKEN",
+  "token_type": "bearer"
+}
+```
+
+Copy the token into Swagger using:
+
+```text
+Authorize
+```
+
+Then enter:
+
+```text
+Bearer <JWT>
+```
+
+The protected `/items` endpoints can now be used.
+
+---
+
+## 14. Step 9 - Test CRUD Locally
+
+After authentication, test:
 
 ```text
 POST /items
@@ -417,7 +645,41 @@ Expected after deletion:
 
 ---
 
-## 12. Step 7 - Prepare Docker
+## 15. Step 10 - Run Automated Tests
+
+Run:
+
+```bash
+pytest -v
+```
+
+The current test suite covers:
+
+```text
+Application
+Database
+Authentication
+Registration
+Login
+Invalid credentials
+JWT authentication
+Protected endpoints
+CRUD
+```
+
+Current result:
+
+```text
+14 passed
+```
+
+There is currently one non-blocking warning related to the Starlette/httpx test client.
+
+The warning does not cause the tests to fail.
+
+---
+
+## 16. Step 11 - Prepare Docker
 
 Check Docker:
 
@@ -463,7 +725,7 @@ docker compose logs
 
 ---
 
-## 13. Step 8 - Test Docker Locally
+## 17. Step 12 - Test Docker Locally
 
 The local Docker architecture is:
 
@@ -484,12 +746,18 @@ mysql_data volume
 
 Only FastAPI exposes a host port.
 
-MySQL does **NOT** expose port 3306 to the host.
+MySQL does NOT expose port 3306 to the host.
 
 The API connects internally using:
 
 ```text
 mysql:3306
+```
+
+The recommended local Docker command is:
+
+```bash
+./scripts/local/run_docker.sh
 ```
 
 Check:
@@ -512,9 +780,15 @@ Expected:
 }
 ```
 
+Swagger:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
 ---
 
-## 14. Step 9 - Test Docker CRUD
+## 18. Step 13 - Test Docker Authentication and CRUD
 
 Open:
 
@@ -525,18 +799,27 @@ http://127.0.0.1:8000/docs
 Test:
 
 ```text
-POST /items
-GET /items
-GET /items/{id}
-PUT /items/{id}
+POST   /auth/register
+POST   /auth/login
+```
+
+Authorize with the returned JWT.
+
+Then test:
+
+```text
+POST   /items
+GET    /items
+GET    /items/{id}
+PUT    /items/{id}
 DELETE /items/{id}
 ```
 
-If all CRUD operations work through Docker, the application is ready for cloud deployment.
+If authentication and CRUD work through Docker, the application is ready for cloud deployment.
 
 ---
 
-## 15. Step 10 - Prepare AWS EC2
+## 19. Step 14 - Prepare AWS EC2
 
 Create or use an EC2 instance.
 
@@ -576,7 +859,7 @@ Make sure the EC2 instance has enough disk space for:
 
 ---
 
-## 16. Step 11 - Prepare SSH Key
+## 20. Step 15 - Prepare SSH Key
 
 Create or use an EC2 SSH key.
 
@@ -596,13 +879,12 @@ Set permissions:
 chmod 400 ~/path/to/my-key.pem
 ```
 
-### IMPORTANT
-
-Never paste a private SSH key into GitHub, README files, chat, source code, or Git.
+> **IMPORTANT:**
+> Never paste a private SSH key into GitHub, README files, chat, source code, or Git.
 
 ---
 
-## 17. Step 12 - Prepare EC2 Configuration
+## 21. Step 16 - Prepare EC2 Configuration
 
 Create:
 
@@ -619,7 +901,7 @@ EC2_INSTANCE_ID="YOUR_INSTANCE_ID"
 
 EC2_USER="ubuntu"
 
-EC2_KEY="$HOME/path/to/YOUR-KEY.pem"
+SSH_KEY="/path/to/YOUR-KEY.pem"
 ```
 
 Add this file to `.gitignore`:
@@ -632,7 +914,7 @@ The configuration contains machine-specific information and the location of the 
 
 ---
 
-## 18. Step 13 - Test EC2 Connection
+## 22. Step 17 - Test EC2 Connection
 
 Make the script executable:
 
@@ -660,7 +942,7 @@ SSH:
 
 ---
 
-## 19. Step 14 - Prepare EC2 Docker
+## 23. Step 18 - Prepare EC2 Docker
 
 From the laptop:
 
@@ -677,9 +959,15 @@ The setup process should ensure:
 * ubuntu user can run Docker
 * application directory exists
 
+The application directory is:
+
+```text
+/home/ubuntu/v4-app
+```
+
 ---
 
-## 20. Step 15 - Verify Docker on EC2
+## 24. Step 19 - Verify Docker on EC2
 
 SSH:
 
@@ -725,7 +1013,7 @@ docker
 
 ---
 
-## 21. Step 16 - Configure AWS Security Group
+## 25. Step 20 - Configure AWS Security Group
 
 The EC2 security group must allow SSH:
 
@@ -751,7 +1039,7 @@ A more restricted rule is preferable:
 YOUR_PUBLIC_IP/32
 ```
 
-Do **NOT** expose:
+Do NOT expose:
 
 ```text
 TCP 3306
@@ -761,40 +1049,56 @@ MySQL must remain private.
 
 ---
 
-## 22. Step 17 - Production Architecture
+## 26. Step 21 - Production Architecture
 
 Production architecture:
 
 ```text
 Internet
-   |
-   | TCP 8000
-   v
+ |
+ | TCP 8000
+ v
 AWS EC2
-   |
-   +-----------------------------+
-   |                             |
-   | Docker                      |
-   |                             |
-   |   +---------------------+   |
-   |   | FastAPI             |   |
-   |   | Port 8000           |   |
-   |   +----------+----------+   |
-   |              |              |
-   |              | mysql:3306   |
-   |              v              |
-   |   +---------------------+   |
-   |   | MySQL               |   |
-   |   | Port 3306 internal  |   |
-   |   +----------+----------+   |
-   |              |              |
-   |        mysql_data volume    |
-   +-----------------------------+
+ |
+ +-----------------------------+
+ |                             |
+ | Docker                      |
+ |                             |
+ |   +---------------------+   |
+ |   | FastAPI             |   |
+ |   | Port 8000           |   |
+ |   +----------+----------+   |
+ |              |              |
+ |              | mysql:3306   |
+ |              v              |
+ |   +---------------------+   |
+ |   | MySQL               |   |
+ |   | Port 3306 internal  |   |
+ |   +----------+----------+   |
+ |              |              |
+ |        mysql_data volume    |
+ +-----------------------------+
+```
+
+Authentication is handled by FastAPI:
+
+```text
+Client
+ |
+ v
+FastAPI
+ |
+ +-- JWT authentication
+ |
+ +-- Protected CRUD
+ |
+ v
+MySQL
 ```
 
 ---
 
-## 23. Step 18 - Prepare Production Compose
+## 27. Step 22 - Prepare Production Compose
 
 The production file is:
 
@@ -810,6 +1114,7 @@ It defines:
 * health check
 * restart policy
 * internal Docker networking
+* JWT environment variable
 
 The API image is supplied by:
 
@@ -823,13 +1128,23 @@ Example:
 ghcr.io/YOUR_USERNAME/ec2-python-deployment-v4
 ```
 
+The production environment also contains:
+
+```text
+JWT_SECRET_KEY
+```
+
+The JWT secret is stored in the EC2 `.env` file created by GitHub Actions.
+
 ---
 
-## 24. Step 19 - Prepare GHCR
+## 28. Step 23 - Prepare GHCR
 
 GitHub Actions builds and pushes the Docker image to:
 
-**GitHub Container Registry**
+```text
+GitHub Container Registry
+```
 
 Example:
 
@@ -843,43 +1158,55 @@ For private packages, EC2 needs GHCR authentication.
 
 ---
 
-## 25. Step 20 - Prepare GitHub Secrets
+## 29. Step 24 - Prepare GitHub Secrets
 
 Add these repository secrets:
 
 ```text
 EC2_HOST
+
 EC2_USER
+
 EC2_SSH_KEY
+
+JWT_SECRET_KEY
 ```
 
 Example:
 
-```text
-EC2_HOST
+**EC2_HOST:**
 
-    EC2 public IP or hostname
+```text
+EC2 public IP or hostname
 ```
 
-```text
-EC2_USER
+**EC2_USER:**
 
-    ubuntu
+```text
+ubuntu
 ```
 
-```text
-EC2_SSH_KEY
+**EC2_SSH_KEY:**
 
-    contents of the private SSH key
+```text
+contents of the private SSH key
+```
+
+**JWT_SECRET_KEY:**
+
+```text
+generated JWT signing secret
 ```
 
 Never print the private key.
+
+Never print the JWT secret.
 
 GitHub automatically masks secret values in workflow logs.
 
 ---
 
-## 26. Step 21 - Prepare GitHub Actions
+## 30. Step 25 - Prepare GitHub Actions
 
 The workflow is:
 
@@ -906,9 +1233,13 @@ Push to GHCR
 Deploy to EC2
 ```
 
+The test job runs before the image is built.
+
+The deployment job only runs after a successful image build.
+
 ---
 
-## 27. Step 22 - Test GitHub Actions
+## 31. Step 26 - Test GitHub Actions
 
 Before deploying, commit and push:
 
@@ -931,7 +1262,7 @@ GitHub Actions should execute:
 
 ---
 
-## 28. Step 23 - GitHub Actions Test Job
+## 32. Step 27 - GitHub Actions Test Job
 
 The test job starts MySQL 8.0 as a GitHub Actions service.
 
@@ -944,14 +1275,16 @@ pytest -v
 Expected:
 
 ```text
-9 passed
+14 passed
 ```
 
 The test job must pass before the Docker image is built.
 
+The tests include authentication and protected CRUD operations.
+
 ---
 
-## 29. Step 24 - Build Docker Image
+## 33. Step 28 - Build Docker Image
 
 After tests pass, GitHub Actions builds:
 
@@ -964,11 +1297,14 @@ The image contains:
 * Python runtime
 * Python dependencies
 * FastAPI application
+* authentication code
 * database initialization script
+
+The container starts by creating database tables and then starts Uvicorn.
 
 ---
 
-## 30. Step 25 - Push Image to GHCR
+## 34. Step 29 - Push Image to GHCR
 
 GitHub Actions pushes the image to:
 
@@ -986,7 +1322,7 @@ and SHA-based tags.
 
 ---
 
-## 31. Step 26 - Deploy to EC2
+## 35. Step 30 - Deploy to EC2
 
 GitHub Actions connects through SSH.
 
@@ -996,9 +1332,13 @@ The deployment process:
 2. Connects to EC2
 3. Creates `~/v4-app`
 4. Copies `docker-compose.prod.yml`
-5. Pulls the GHCR image
-6. Starts Docker Compose
-7. Displays container status
+5. Creates production `.env`
+6. Writes `JWT_SECRET_KEY`
+7. Validates the environment file
+8. Validates Docker Compose
+9. Pulls the GHCR image
+10. Starts Docker Compose
+11. Displays container status
 
 The remote directory is:
 
@@ -1006,9 +1346,17 @@ The remote directory is:
 /home/ubuntu/v4-app
 ```
 
+The production environment file is:
+
+```text
+/home/ubuntu/v4-app/.env
+```
+
+The `.env` file is protected with restrictive permissions.
+
 ---
 
-## 32. Step 27 - Verify Deployment
+## 36. Step 31 - Verify Deployment
 
 From the laptop:
 
@@ -1033,7 +1381,7 @@ Check logs:
 
 ---
 
-## 33. Step 28 - Verify FastAPI
+## 37. Step 32 - Verify FastAPI
 
 Open:
 
@@ -1066,7 +1414,7 @@ Expected:
 
 ---
 
-## 34. Step 29 - Open Swagger
+## 38. Step 33 - Open Swagger
 
 Open:
 
@@ -1077,24 +1425,84 @@ http://EC2_PUBLIC_IP:8000/docs
 Swagger should show:
 
 ```text
-GET    /
-GET    /health
-POST   /items
-GET    /items
-GET    /items/{id}
-PUT    /items/{id}
-DELETE /items/{id}
+GET     /
+GET     /health
+
+POST    /auth/register
+POST    /auth/login
+
+POST    /items
+GET     /items
+GET     /items/{id}
+PUT     /items/{id}
+DELETE  /items/{id}
+```
+
+The item endpoints require JWT authentication.
+
+---
+
+## 39. Step 34 - Test Production Authentication
+
+Register:
+
+```text
+POST /auth/register
+```
+
+Example:
+
+```json
+{
+  "username": "saman",
+  "password": "password123"
+}
+```
+
+Login:
+
+```text
+POST /auth/login
+```
+
+Expected response:
+
+```json
+{
+  "access_token": "JWT_TOKEN",
+  "token_type": "bearer"
+}
+```
+
+Authorize in Swagger.
+
+Then use:
+
+```text
+POST /items
+```
+
+and the other protected endpoints.
+
+Test an unauthenticated request as well.
+
+Expected:
+
+```text
+401 Unauthorized
 ```
 
 ---
 
-## 35. Step 30 - Test Production CRUD
+## 40. Step 35 - Test Production CRUD
 
 Create:
 
 ```text
 POST /items
 ```
+
+Example:
 
 ```json
 {
@@ -1152,7 +1560,7 @@ Expected:
 
 ---
 
-## 36. Step 31 - Test Database Persistence
+## 41. Step 36 - Test Database Persistence
 
 Create an item.
 
@@ -1190,7 +1598,7 @@ Restarting containers does not delete the volume.
 
 ---
 
-## 37. Step 32 - Final End-to-End Test
+## 42. Step 37 - Final End-to-End Test
 
 The final test is:
 
@@ -1211,18 +1619,21 @@ GitHub Actions
  +-- GHCR push
  |
  +-- SSH
-       |
-       v
+      |
+      v
      EC2
-       |
-       v
- Docker Compose
-       |
-       +-- FastAPI
-       |
-       +-- MySQL
-              |
-              v
+      |
+      v
+Docker Compose
+      |
+      +-- FastAPI
+      |
+      +-- MySQL
+             |
+             v
+        JWT Authentication
+             |
+             v
           CRUD API
 ```
 
@@ -1230,57 +1641,63 @@ A successful V4 deployment means every stage above works.
 
 ---
 
-## 38. Local Commands
+## 43. Local Commands
 
-### Run tests
-
-```bash
-./scripts/local/test.sh
-```
-
-### Run application
+Run application directly:
 
 ```bash
-./scripts/local/run.sh
+./scripts/local/run_local.sh
 ```
 
-### Docker start
+Run application with Docker:
+
+```bash
+./scripts/local/run_docker.sh
+```
+
+Run tests:
+
+```bash
+pytest -v
+```
+
+Docker start:
 
 ```bash
 docker compose up -d
 ```
 
-### Docker stop
+Docker stop:
 
 ```bash
 docker compose down
 ```
 
-### Docker rebuild
+Docker rebuild:
 
 ```bash
 docker compose up --build
 ```
 
-### Docker status
+Docker status:
 
 ```bash
 docker compose ps
 ```
 
-### Docker logs
+Docker logs:
 
 ```bash
 docker compose logs
 ```
 
-### API logs
+API logs:
 
 ```bash
 docker compose logs api
 ```
 
-### MySQL logs
+MySQL logs:
 
 ```bash
 docker compose logs mysql
@@ -1288,69 +1705,69 @@ docker compose logs mysql
 
 ---
 
-## 39. EC2 Commands
+## 44. EC2 Commands
 
-### Status
+Status:
 
 ```bash
 ./scripts/aws/ec2.sh status
 ```
 
-### IP
+IP:
 
 ```bash
 ./scripts/aws/ec2.sh ip
 ```
 
-### Start
+Start:
 
 ```bash
 ./scripts/aws/ec2.sh start
 ```
 
-### Stop
+Stop:
 
 ```bash
 ./scripts/aws/ec2.sh stop
 ```
 
-### Reboot
+Reboot:
 
 ```bash
 ./scripts/aws/ec2.sh reboot
 ```
 
-### SSH
+SSH:
 
 ```bash
 ./scripts/aws/ec2.sh ssh
 ```
 
-### Setup
+Setup:
 
 ```bash
 ./scripts/aws/ec2.sh setup
 ```
 
-### Application status
+Application status:
 
 ```bash
 ./scripts/aws/ec2.sh app-status
 ```
 
-### Application logs
+Application logs:
 
 ```bash
 ./scripts/aws/ec2.sh logs
 ```
 
-### Application restart
+Application restart:
 
 ```bash
 ./scripts/aws/ec2.sh restart
 ```
 
-### Application stop
+Application stop:
 
 ```bash
 ./scripts/aws/ec2.sh app-stop
@@ -1358,51 +1775,51 @@ docker compose logs mysql
 
 ---
 
-## 40. EC2 Manual Troubleshooting
+## 45. EC2 Manual Troubleshooting
 
-### SSH
+SSH:
 
 ```bash
 ./scripts/aws/ec2.sh ssh
 ```
 
-### Docker version
+Docker version:
 
 ```bash
 docker --version
 ```
 
-### Compose version
+Compose version:
 
 ```bash
 docker compose version
 ```
 
-### Docker containers
+Docker containers:
 
 ```bash
 docker ps
 ```
 
-### All containers
+All containers:
 
 ```bash
 docker ps -a
 ```
 
-### Docker service
+Docker service:
 
 ```bash
 sudo systemctl status docker
 ```
 
-### Docker service logs
+Docker service logs:
 
 ```bash
 sudo journalctl -u docker
 ```
 
-### Docker group
+Docker group:
 
 ```bash
 id -nG
@@ -1410,69 +1827,94 @@ id -nG
 
 ---
 
-## 41. Production Troubleshooting
+## 46. Production Troubleshooting
 
-### Application status
+Application status:
 
 ```bash
 cd ~/v4-app
 
-docker compose -f docker-compose.prod.yml ps
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  ps
 ```
 
-### Application logs
+Application logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs --tail=100 api
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  logs --tail=100 api
 ```
 
-### MySQL logs
+MySQL logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs --tail=100 mysql
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  logs --tail=100 mysql
 ```
 
-### All logs
+All logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs --tail=100
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  logs --tail=100
 ```
 
-### Pull latest image
+Pull latest image:
 
 ```bash
 IMAGE_NAME=ghcr.io/YOUR_USERNAME/ec2-python-deployment-v4 \
-docker compose -f docker-compose.prod.yml pull
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  pull
 ```
 
-### Start
+Start:
 
 ```bash
 IMAGE_NAME=ghcr.io/YOUR_USERNAME/ec2-python-deployment-v4 \
-docker compose -f docker-compose.prod.yml up -d
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  up -d
 ```
 
-### Restart
+Restart:
 
 ```bash
-docker compose -f docker-compose.prod.yml restart
+docker compose \
+  --env-file .env \
+  -f docker-compose.prod.yml \
+  restart
 ```
 
 ---
 
-## 42. Problem - Docker App Could Not Import App
+## 47. Problem - Docker App Could Not Import App
 
-### Error
+Error:
 
 ```text
 ModuleNotFoundError: No module named 'app'
 ```
 
-### Cause
+Cause:
 
-The Python module path inside the Docker container did not include `/app`.
+The Python module path inside the Docker container did not include:
 
-### Fix
+```text
+/app
+```
+
+Fix:
 
 Add to Dockerfile:
 
@@ -1494,7 +1936,7 @@ docker compose up
 
 ---
 
-## 43. Problem - Local MySQL Port Conflict
+## 48. Problem - Local MySQL Port Conflict
 
 The Ubuntu laptop already had MySQL running on:
 
@@ -1504,7 +1946,7 @@ The Ubuntu laptop already had MySQL running on:
 
 Docker MySQL attempted to use the same host port.
 
-### Fix
+Fix:
 
 Do not expose MySQL to the host.
 
@@ -1522,17 +1964,17 @@ Only FastAPI exposes:
 
 ---
 
-## 44. Problem - Tests Used Development Database
+## 49. Problem - Tests Used Development Database
 
-### Cause
+Cause:
 
 Tests were using the normal application database.
 
-### Risk
+Risk:
 
 Tests could modify development data.
 
-### Fix
+Fix:
 
 Create:
 
@@ -1550,13 +1992,13 @@ The tests override FastAPI's database dependency and use the isolated test datab
 
 ---
 
-## 45. Problem - MySQL Missing in GitHub Actions
+## 50. Problem - MySQL Missing in GitHub Actions
 
-### Cause
+Cause:
 
 GitHub Actions does not automatically provide MySQL.
 
-### Fix
+Fix:
 
 Use a MySQL service:
 
@@ -1569,21 +2011,21 @@ The CI test environment therefore has its own MySQL instance.
 
 ---
 
-## 46. Problem - Deployment File Not Found
+## 51. Problem - Deployment File Not Found
 
-### Error
+Error:
 
 ```text
 docker-compose.prod.yml not found
 ```
 
-### Cause
+Cause:
 
 GitHub Actions jobs run on separate fresh runners.
 
 The deploy job had not checked out the repository.
 
-### Fix
+Fix:
 
 Add:
 
@@ -1596,19 +2038,19 @@ to the deploy job.
 
 ---
 
-## 47. Problem - Docker Permission Denied
+## 52. Problem - Docker Permission Denied
 
-### Error
+Error:
 
 ```text
 permission denied while trying to connect to the Docker daemon socket
 ```
 
-### Cause
+Cause:
 
-The `ubuntu` user was not in the Docker group.
+The ubuntu user was not in the Docker group.
 
-### Fix
+Fix:
 
 ```bash
 sudo usermod -aG docker $USER
@@ -1636,16 +2078,16 @@ id -nG
 
 ---
 
-## 48. Problem - Docker Compose Package Conflict
+## 53. Problem - Docker Compose Package Conflict
 
-### Error
+Error:
 
 ```text
 trying to overwrite:
 /usr/libexec/docker/cli-plugins/docker-compose
 ```
 
-### Cause
+Cause:
 
 Conflicting Docker Compose packages were installed.
 
@@ -1661,7 +2103,7 @@ and:
 docker-compose-plugin
 ```
 
-### Repair
+Repair:
 
 ```bash
 sudo dpkg --configure -a
@@ -1683,15 +2125,15 @@ docker compose version
 
 ---
 
-## 49. Problem - Docker Compose Command Unknown
+## 54. Problem - Docker Compose Command Unknown
 
-### Error
+Error:
 
 ```text
 docker: unknown command: docker compose
 ```
 
-### Cause
+Cause:
 
 Docker was installed but the Compose CLI plugin was unavailable.
 
@@ -1711,7 +2153,7 @@ docker compose version
 
 ---
 
-## 50. Problem - Exit Code 125
+## 55. Problem - Exit Code 125
 
 GitHub Actions:
 
@@ -1725,13 +2167,17 @@ Useful error:
 unknown shorthand flag: 'f' in -f
 ```
 
-### Cause
+Cause:
 
-`docker compose` was not available on EC2.
+```text
+docker compose
+```
+
+was not available on EC2.
 
 Docker interpreted the command incorrectly.
 
-### Fix
+Fix:
 
 Install/configure Docker Compose.
 
@@ -1745,7 +2191,7 @@ Then rerun deployment.
 
 ---
 
-## 51. Problem - GitHub Actions Logs Appeared Empty
+## 56. Problem - GitHub Actions Logs Appeared Empty
 
 Sometimes the GitHub Actions web interface may fail to display logs correctly.
 
@@ -1761,9 +2207,9 @@ Do not assume an empty UI means the workflow produced no output.
 
 ---
 
-## 52. Problem - Laptop Works but Phone Cannot Connect
+## 57. Problem - Laptop Works but Phone Cannot Connect
 
-### Cause
+Cause:
 
 The EC2 Security Group may only allow the laptop's public IP.
 
@@ -1773,10 +2219,10 @@ Check:
 
 ```text
 AWS EC2
- -> Instance
- -> Security
- -> Security Groups
- -> Inbound rules
+-> Instance
+-> Security
+-> Security Groups
+-> Inbound rules
 ```
 
 Allow:
@@ -1799,7 +2245,7 @@ YOUR_PUBLIC_IP/32
 
 ---
 
-## 53. Problem - MySQL Should Not Be Public
+## 58. Problem - MySQL Should Not Be Public
 
 Never solve API connectivity problems by opening:
 
@@ -1833,39 +2279,85 @@ MySQL :3306
 
 ---
 
-## 54. GitHub Troubleshooting
+## 59. Problem - JWT Secret Not Configured
 
-### Check recent commits
+If the application reports that:
+
+```text
+JWT_SECRET_KEY
+```
+
+is missing, check the local `.env` file.
+
+For local development:
+
+```text
+.env
+```
+
+should contain:
+
+```text
+JWT_SECRET_KEY=YOUR_GENERATED_SECRET
+```
+
+Generate a new secret:
+
+```bash
+openssl rand -hex 32
+```
+
+For production, the JWT secret is supplied through the GitHub Actions secret:
+
+```text
+JWT_SECRET_KEY
+```
+
+GitHub Actions creates:
+
+```text
+/home/ubuntu/v4-app/.env
+```
+
+on EC2 during deployment.
+
+Never commit the production `.env`.
+
+---
+
+## 60. GitHub Troubleshooting
+
+Check recent commits:
 
 ```bash
 git log --oneline --decorate -10
 ```
 
-### Check status
+Check status:
 
 ```bash
 git status
 ```
 
-### Check workflow file
+Check workflow file:
 
 ```bash
 git show HEAD:.github/workflows/ci.yml
 ```
 
-### Check production Compose file
+Check production Compose file:
 
 ```bash
 git show HEAD:docker-compose.prod.yml
 ```
 
-### Check tracked production file
+Check tracked production file:
 
 ```bash
 git ls-files docker-compose.prod.yml
 ```
 
-### Push
+Push:
 
 ```bash
 git push origin main
@@ -1873,7 +2365,7 @@ git push origin main
 
 ---
 
-## 55. Docker Troubleshooting Checklist
+## 61. Docker Troubleshooting Checklist
 
 If the API does not start:
 
@@ -1914,63 +2406,129 @@ docker compose down -v
 docker compose up --build
 ```
 
+> **Be careful:**
+>
+> ```bash
+> docker compose down -v
+> ```
+>
+> removes the local MySQL volume and therefore deletes the local database data.
+
 ---
 
-## 56. EC2 Deployment Checklist
+## 62. EC2 Deployment Checklist
 
 Before deployment:
 
-* [ ] EC2 exists
-* [ ] EC2 is running
-* [ ] SSH key works
-* [ ] `ec2.conf` is configured
-* [ ] Docker installed
-* [ ] Docker Compose installed
-* [ ] Docker service running
-* [ ] ubuntu can run Docker
-* [ ] Security Group allows SSH
-* [ ] Security Group allows TCP 8000
-* [ ] MySQL port 3306 is **NOT** public
-* [ ] GHCR package exists
-* [ ] GitHub Secrets configured
-* [ ] `docker-compose.prod.yml` committed
-* [ ] `ci.yml` committed
+```text
+[ ] EC2 exists
+
+[ ] EC2 is running
+
+[ ] SSH key works
+
+[ ] ec2.conf is configured
+
+[ ] Docker installed
+
+[ ] Docker Compose installed
+
+[ ] Docker service running
+
+[ ] ubuntu can run Docker
+
+[ ] Security Group allows SSH
+
+[ ] Security Group allows TCP 8000
+
+[ ] MySQL port 3306 is NOT public
+
+[ ] GHCR package exists
+
+[ ] GitHub Secrets configured
+
+[ ] JWT_SECRET_KEY configured
+
+[ ] docker-compose.prod.yml committed
+
+[ ] ci.yml committed
+
+[ ] .env is not committed
+```
 
 ---
 
-## 57. CI/CD Checklist
+## 63. CI/CD Checklist
 
 Push to main.
 
 Verify:
 
-* [ ] GitHub Actions starts
-* [ ] MySQL service starts
-* [ ] pytest passes
-* [ ] Docker image builds
-* [ ] GHCR login succeeds
-* [ ] Docker image pushes
-* [ ] SSH connection succeeds
-* [ ] `docker-compose.prod.yml` copies to EC2
-* [ ] GHCR image pulls
-* [ ] Docker Compose starts
-* [ ] `v4_api` is running
-* [ ] `v4_mysql` is running
+```text
+[ ] GitHub Actions starts
+
+[ ] MySQL service starts
+
+[ ] pytest passes
+
+[ ] Authentication tests pass
+
+[ ] Docker image builds
+
+[ ] GHCR login succeeds
+
+[ ] Docker image pushes
+
+[ ] SSH connection succeeds
+
+[ ] docker-compose.prod.yml copies to EC2
+
+[ ] Production .env is created
+
+[ ] JWT_SECRET_KEY is available
+
+[ ] Docker Compose configuration validates
+
+[ ] GHCR image pulls
+
+[ ] Docker Compose starts
+
+[ ] v4_api is running
+
+[ ] v4_mysql is running
+```
 
 ---
 
-## 58. Application Checklist
+## 64. Application Checklist
 
 Verify:
 
-* [ ] `GET /`
-* [ ] `GET /health`
-* [ ] `GET /docs`
-* [ ] `POST /items`
-* [ ] `GET /items`
-* [ ] `GET /items/{id}`
-* [ ] `PUT /items/{id}`
-* [ ] `DELETE /items/{id}`
+```text
+[ ] GET /
+
+[ ] GET /health
+
+[ ] GET /docs
+
+[ ] POST /auth/register
+
+[ ] POST /auth/login
+
+[ ] JWT authorization works
+
+[ ] POST /items
+
+[ ] GET /items
+
+[ ] GET /items/{id}
+
+[ ] PUT /items/{id}
+
+[ ] DELETE /items/{id}
+
+[ ] Unauthorized requests return 401
+```
 
 Then restart:
 
@@ -1982,7 +2540,7 @@ Verify data persistence.
 
 ---
 
-## 59. Security Notes
+## 65. Security Notes
 
 Never commit:
 
@@ -2000,18 +2558,29 @@ scripts/aws/ec2.conf
 
 Never commit:
 
+```text
+.env
+```
+
+Never commit:
+
 * AWS access keys
 * GitHub tokens
 * passwords
 * production secrets
 * database credentials
+* JWT secrets
 
 Use GitHub Secrets for CI/CD credentials:
 
 ```text
 EC2_HOST
+
 EC2_USER
+
 EC2_SSH_KEY
+
+JWT_SECRET_KEY
 ```
 
 Do not expose:
@@ -2022,13 +2591,17 @@ Do not expose:
 
 to the public internet.
 
+Passwords are stored as Argon2 hashes rather than plaintext.
+
+JWT signing uses the secret stored outside the source code.
+
 For a real production system, improve security with:
 
 * HTTPS
 * reverse proxy
 * domain name
 * TLS certificates
-* secret management
+* AWS Secrets Manager
 * private database networking
 * restrictive Security Groups
 * non-root containers
@@ -2040,144 +2613,304 @@ For a real production system, improve security with:
 
 ---
 
-## 60. V4 Development Progression
+## 66. V4 Development Progression
 
-```text
-V4.1
+### V4.1
+
 FastAPI foundation
-        |
-        v
-V4.2
-MySQL + SQLAlchemy
-        |
-        v
-V4.3
-CRUD + isolated automated tests
-        |
-        v
-V4.4
-Docker Compose
-        |
-        v
-V4.5
-GitHub Actions + GHCR
-        |
-        v
-V4.6
-AWS EC2 deployment
-```
-
----
-
-## 61. Final Architecture
 
 ```text
-                        Developer
-                            |
-                            | git push
-                            v
-                     GitHub Repository
-                            |
-                            v
-                    GitHub Actions
-                            |
-             +--------------+--------------+
-             |              |              |
-             v              v              v
-           Tests         Docker          Deploy
-             |            Build             |
-             |              |               |
-             +--------------+               |
-                            |               |
-                            v               |
-                           GHCR             |
-                            |               |
-                            +-------+-------+
-                                    |
-                                    | SSH
-                                    v
-                              AWS EC2
-                                    |
-                            Docker Compose
-                                    |
-                       +------------+------------+
-                       |                         |
-                       v                         v
-                  FastAPI API                 MySQL
-                    :8000                    :3306
-                       |                         |
-                       +------------+------------+
-                                    |
-                              Docker network
-                                    |
-                              mysql_data volume
+    |
+    v
+```
+
+### V4.2
+
+MySQL + SQLAlchemy
+
+```text
+    |
+    v
+```
+
+### V4.3
+
+CRUD + isolated automated tests
+
+```text
+    |
+    v
+```
+
+### V4.4
+
+Docker Compose
+
+```text
+    |
+    v
+```
+
+### V4.5
+
+GitHub Actions + GHCR
+
+```text
+    |
+    v
+```
+
+### V4.6
+
+AWS EC2 deployment
+
+```text
+    |
+    v
+```
+
+### V4.7
+
+JWT authentication
+
+---
+
+## 67. Final Architecture
+
+```text
+                    Developer
+
+                        |
+
+                        | git push
+
+                        v
+
+                 GitHub Repository
+
+                        |
+
+                        v
+
+                GitHub Actions
+
+                        |
+
+         +--------------+--------------+
+
+         |              |              |
+
+         v              v              v
+
+       Tests         Docker          Deploy
+
+         |            Build             |
+
+         |              |               |
+
+         +--------------+               |
+
+                        |               |
+
+                        v               |
+
+                       GHCR             |
+
+                        |               |
+
+                        +-------+-------+
+
+                                |
+
+                                | SSH
+
+                                v
+
+                          AWS EC2
+
+                                |
+
+                        Docker Compose
+
+                                |
+
+                   +------------+------------+
+
+                   |                         |
+
+                   v                         v
+
+              FastAPI API                 MySQL
+
+                :8000                    :3306
+
+                   |                         |
+
+                   | JWT                     |
+
+                   v                         |
+
+              Authentication                |
+
+                   |                         |
+
+                   +------------+------------+
+
+                                |
+
+                          Docker network
+
+                                |
+
+                          mysql_data volume
+```
+
+### Application Authentication Flow
+
+```text
+                 Client
+                    |
+                    v
+             FastAPI /auth
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+      Register              Login
+          |                   |
+          v                   v
+      Argon2 hash        Verify password
+          |                   |
+          v                   v
+        MySQL              Create JWT
+                              |
+                              v
+                         Access Token
+                              |
+                              v
+                     Authorization Header
+                              |
+                              v
+                    Protected /items API
+                              |
+                              v
+                            MySQL
 ```
 
 ---
 
-## 62. V4 Status
+## 68. V4 Status
 
-| Version | Component              | Status   |
-| ------- | ---------------------- | -------- |
-| V4.1    | FastAPI foundation     | COMPLETE |
-| V4.2    | MySQL + SQLAlchemy     | COMPLETE |
-| V4.3    | CRUD + automated tests | COMPLETE |
-| V4.4    | Docker Compose         | COMPLETE |
-| V4.5    | CI/CD + GHCR           | COMPLETE |
-| V4.6    | AWS EC2 deployment     | COMPLETE |
+```text
+V4.1  FastAPI foundation             COMPLETE
+
+V4.2  MySQL + SQLAlchemy             COMPLETE
+
+V4.3  CRUD + automated tests         COMPLETE
+
+V4.4  Docker Compose                 COMPLETE
+
+V4.5  CI/CD + GHCR                   COMPLETE
+
+V4.6  AWS EC2 deployment             COMPLETE
+
+V4.7  JWT authentication             COMPLETE
+```
+
+Current automated test result:
+
+```text
+14 passed
+```
 
 ---
 
-## 63. Final Result
+## 69. Final Result
 
 V4 provides a complete learning-oriented DevOps pipeline:
 
 ```text
 FastAPI
 
-   +
++
 
 MySQL
 
-   +
++
 
 SQLAlchemy
 
-   +
++
+
+JWT Authentication
+
++
+
+Argon2 Password Hashing
+
++
 
 Automated Tests
 
-   +
++
 
 Docker
 
-   +
++
 
 Docker Compose
 
-   +
++
 
 GitHub Actions
 
-   +
++
 
 GHCR
 
-   +
++
 
 AWS EC2
 
-   +
++
 
 SSH Deployment
 
-   +
++
 
 Operational Scripts
 
-   =
+=
 
 Complete CI/CD Deployment Pipeline
 ```
 
-# V4 IS COMPLETE.
+The application can now be run in three environments:
+
+```text
+1. Directly on the Ubuntu laptop
+
+2. Inside Docker on the Ubuntu laptop
+
+3. Inside Docker on AWS EC2
+```
+
+Local direct execution:
+
+```bash
+./scripts/local/run_local.sh
+```
+
+Local Docker execution:
+
+```bash
+./scripts/local/run_docker.sh
+```
+
+AWS production management:
+
+```bash
+./scripts/aws/ec2.sh app-status
+```
+
+V4 IS COMPLETE.
