@@ -219,12 +219,28 @@ jobs:
             "echo '$JWT_SECRET_B64' | base64 -d > ~/v4-app/.env && chmod 600 ~/v4-app/.env"
 
 
+          echo "Verifying production environment file..."
+
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            "test -s ~/v4-app/.env && grep -q '^JWT_SECRET_KEY=.' ~/v4-app/.env"
+
+          echo "[SUCCESS] Production environment file is ready."
+
+
           echo "Pulling Docker image and deploying..."
 
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
-            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml pull && IMAGE_NAME='$IMAGE_NAME' docker compose -f docker-compose.prod.yml up -d"
+            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose --env-file .env -f docker-compose.prod.yml pull"
+
+
+          ssh \
+            -i ~/.ssh/ec2_key \
+            "$EC2_USER@$EC2_HOST" \
+            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose --env-file .env -f docker-compose.prod.yml up -d"
 
 
           echo "Waiting for containers..."
@@ -237,7 +253,7 @@ jobs:
           ssh \
             -i ~/.ssh/ec2_key \
             "$EC2_USER@$EC2_HOST" \
-            "cd ~/v4-app && docker compose -f docker-compose.prod.yml ps"
+            "cd ~/v4-app && IMAGE_NAME='$IMAGE_NAME' docker compose --env-file .env -f docker-compose.prod.yml ps"
 
 
           echo "Deployment completed successfully."
